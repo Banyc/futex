@@ -18,7 +18,7 @@ pub struct FutexWaitContext<'a> {
 ///
 /// # Return
 ///
-/// The return can be a spurious wake-up.
+/// The [`Ok`] return can be a spurious wake-up.
 /// Therefore, callers should use the futex word's value to decide whether to continue to block or not.
 pub fn futex_wait(cx: FutexWaitContext<'_>) -> std::io::Result<()> {
     let timeout_duration = cx.timeout.map(|(t, _m)| t);
@@ -56,17 +56,13 @@ pub enum TimeoutMeasure {
     MonoTime,
 }
 
-/// Retry on spurious wake-ups and [`std::io::ErrorKind::Interrupted`].
+/// Retry on [`std::io::ErrorKind::Interrupted`].
 ///
 /// Learn more from [`futex_wait`].
-pub fn genuine_futex_wait(cx: FutexWaitContext<'_>) -> std::io::Result<()> {
+pub fn resumed_futex_wait(cx: FutexWaitContext<'_>) -> std::io::Result<()> {
     loop {
         let Err(e) = futex_wait(cx) else {
-            if cx.word.load(std::sync::atomic::Ordering::SeqCst) == cx.expected {
-                return Ok(());
-            }
-            // Spurious wake-up
-            continue;
+            return Ok(());
         };
         if matches!(e.kind(), std::io::ErrorKind::Interrupted) {
             continue;
@@ -77,10 +73,10 @@ pub fn genuine_futex_wait(cx: FutexWaitContext<'_>) -> std::io::Result<()> {
 
 /// Busy looping on [`std::io::ErrorKind::WouldBlock`].
 ///
-/// Learn more from [`genuine_futex_wait`].
+/// Learn more from [`resumed_futex_wait`].
 pub fn busy_futex_wait(cx: FutexWaitContext<'_>) -> std::io::Result<()> {
     loop {
-        let Err(e) = genuine_futex_wait(cx) else {
+        let Err(e) = resumed_futex_wait(cx) else {
             return Ok(());
         };
         if matches!(e.kind(), std::io::ErrorKind::WouldBlock) {

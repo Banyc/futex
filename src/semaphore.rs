@@ -1,9 +1,10 @@
 use std::sync::atomic::AtomicU32;
 
-use crate::{futex_wake, genuine_futex_wait, FutexWaitContext, WakeWaiters, U31};
+use crate::{futex_wake, resumed_futex_wait, FutexWaitContext, WakeWaiters, U31};
 
 const EXPECTED_FUTEX: u32 = 0;
 
+/// A semaphore is an integer whose value is never allowed to fall below zero.
 #[derive(Debug)]
 pub struct Semaphore {
     futex: AtomicU32,
@@ -17,6 +18,8 @@ impl Semaphore {
         }
     }
 
+    /// Decrement the semaphore value by one.
+    /// If the semaphore value is currently zero, then it will block until the value becomes greater than zero.
     pub fn wait(&self) {
         loop {
             let value = self.value.load(std::sync::atomic::Ordering::SeqCst);
@@ -35,7 +38,7 @@ impl Semaphore {
                 }
                 continue;
             }
-            genuine_futex_wait(FutexWaitContext {
+            resumed_futex_wait(FutexWaitContext {
                 word: &self.futex,
                 expected: EXPECTED_FUTEX,
                 timeout: None,
@@ -44,6 +47,7 @@ impl Semaphore {
         }
     }
 
+    /// Increment the semaphore value by one.
     pub fn signal(&self) {
         loop {
             let value = self.value.load(std::sync::atomic::Ordering::SeqCst);
@@ -51,7 +55,7 @@ impl Semaphore {
                 .value
                 .compare_exchange(
                     value,
-                    value + 1,
+                    value.checked_add(1).expect("`u32` addition overflow"),
                     std::sync::atomic::Ordering::SeqCst,
                     std::sync::atomic::Ordering::SeqCst,
                 )

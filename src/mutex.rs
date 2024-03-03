@@ -1,6 +1,6 @@
 use std::sync::atomic::AtomicU32;
 
-use crate::{futex_wake, genuine_futex_wait, FutexWaitContext, WakeWaiters, U31};
+use crate::{futex_wake, resumed_futex_wait, FutexWaitContext, WakeWaiters, U31};
 
 #[derive(Debug, Clone, Copy)]
 pub enum State {
@@ -48,7 +48,7 @@ pub fn lock(futex: &AtomicU32) {
         {
             return;
         }
-        match genuine_futex_wait(FutexWaitContext {
+        match resumed_futex_wait(FutexWaitContext {
             word: futex,
             expected: State::Locked.into(),
             timeout: None,
