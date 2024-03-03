@@ -1,6 +1,7 @@
 use std::{mem::transmute, sync::atomic::AtomicU32, time::Duration};
 
 pub mod mutex;
+pub mod semaphore;
 
 #[derive(Debug, Clone, Copy)]
 pub struct FutexWaitContext<'a> {
