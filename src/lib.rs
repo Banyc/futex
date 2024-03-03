@@ -86,14 +86,14 @@ pub fn busy_futex_wait(cx: FutexWaitContext<'_>) -> std::io::Result<()> {
 }
 
 /// Returns the number of waiters that were woken up.
-pub fn futex_wake(addr: *mut u32, waiters: WakeWaiters) -> std::io::Result<usize> {
+pub fn futex_wake(addr: &AtomicU32, waiters: WakeWaiters) -> std::io::Result<usize> {
     let waiters = match waiters {
         WakeWaiters::Amount(n) => n.get(),
         WakeWaiters::All => unsafe { transmute(i32::MAX) },
     };
     let woken_waiters = unsafe {
         rustix::thread::futex(
-            addr,
+            addr.as_ptr(),
             rustix::thread::FutexOperation::Wake,
             rustix::thread::FutexFlags::empty(),
             waiters,
@@ -127,6 +127,8 @@ impl U31 {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
 
     #[test]
@@ -140,5 +142,27 @@ mod tests {
             panic!();
         };
         assert!(matches!(e.kind(), std::io::ErrorKind::WouldBlock));
+    }
+
+    #[test]
+    fn test_wake() {
+        let word = Arc::new(AtomicU32::new(0));
+        let waiter = std::thread::spawn({
+            let word = word.clone();
+            move || {
+                futex_wait(FutexWaitContext {
+                    word: &word.clone(),
+                    expected: 0,
+                    timeout: None,
+                })
+                .unwrap();
+            }
+        });
+        loop {
+            if futex_wake(&word, WakeWaiters::Amount(U31::new(1).unwrap())).unwrap() == 1 {
+                break;
+            }
+        }
+        waiter.join().unwrap();
     }
 }
