@@ -1,5 +1,7 @@
 use std::{mem::transmute, sync::atomic::AtomicU32, time::Duration};
 
+pub mod mutex;
+
 #[derive(Debug, Clone, Copy)]
 pub struct FutexWaitContext<'a> {
     pub word: &'a AtomicU32,
@@ -73,6 +75,8 @@ pub fn genuine_futex_wait(cx: FutexWaitContext<'_>) -> std::io::Result<()> {
 }
 
 /// Busy looping on [`std::io::ErrorKind::WouldBlock`].
+///
+/// Learn more from [`genuine_futex_wait`].
 pub fn busy_futex_wait(cx: FutexWaitContext<'_>) -> std::io::Result<()> {
     loop {
         let Err(e) = genuine_futex_wait(cx) else {
