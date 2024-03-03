@@ -62,7 +62,7 @@ pub enum TimeoutMeasure {
 pub fn genuine_futex_wait(cx: FutexWaitContext<'_>) -> std::io::Result<()> {
     loop {
         let Err(e) = futex_wait(cx) else {
-            if cx.word.load(std::sync::atomic::Ordering::Relaxed) == cx.expected {
+            if cx.word.load(std::sync::atomic::Ordering::SeqCst) == cx.expected {
                 return Ok(());
             }
             // Spurious wake-up
