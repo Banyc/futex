@@ -29,8 +29,8 @@ pub fn main() {
     let futex_1 = unsafe { &(*i_addr)[0] };
     let futex_2 = unsafe { &(*i_addr)[1] };
 
-    futex_1.store(FutexPState::Unavailable.into(), Ordering::SeqCst);
-    futex_2.store(FutexPState::Available.into(), Ordering::SeqCst);
+    futex_1.store(FutexState::Unavailable.into(), Ordering::SeqCst);
+    futex_2.store(FutexState::Available.into(), Ordering::SeqCst);
 
     let child_pid = unsafe { fork() }.expect("fork");
     match child_pid {
@@ -55,12 +55,12 @@ pub fn main() {
     }
 }
 
-enum FutexPState {
+enum FutexState {
     Unavailable = 0,
     Available,
 }
-impl From<FutexPState> for u32 {
-    fn from(value: FutexPState) -> Self {
+impl From<FutexState> for u32 {
+    fn from(value: FutexState) -> Self {
         value as u32
     }
 }
@@ -70,8 +70,8 @@ fn f_wait(futex_p: &AtomicU32) {
         // Is the futex available?
         if futex_p
             .compare_exchange(
-                FutexPState::Available.into(),
-                FutexPState::Unavailable.into(),
+                FutexState::Available.into(),
+                FutexState::Unavailable.into(),
                 Ordering::SeqCst,
                 Ordering::SeqCst,
             )
@@ -84,7 +84,7 @@ fn f_wait(futex_p: &AtomicU32) {
         // Futex is not available; wait
         if let Err(e) = futex_wait(FutexWaitContext {
             word: futex_p,
-            expected: FutexPState::Unavailable.into(),
+            expected: FutexState::Unavailable.into(),
             timeout: None,
         }) {
             if !matches!(e.kind(), io::ErrorKind::WouldBlock) {
@@ -97,8 +97,8 @@ fn f_wait(futex_p: &AtomicU32) {
 fn f_post(futex_p: &AtomicU32) {
     if futex_p
         .compare_exchange(
-            FutexPState::Unavailable.into(),
-            FutexPState::Available.into(),
+            FutexState::Unavailable.into(),
+            FutexState::Available.into(),
             Ordering::SeqCst,
             Ordering::SeqCst,
         )
