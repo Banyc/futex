@@ -22,15 +22,15 @@ impl Semaphore {
     /// If the semaphore value is currently zero, then it will block until the value becomes greater than zero.
     pub fn wait(&self) {
         loop {
-            let value = self.value.load(std::sync::atomic::Ordering::SeqCst);
+            let value = self.value.load(std::sync::atomic::Ordering::Relaxed);
             if 0 < value {
                 if self
                     .value
                     .compare_exchange(
                         value,
                         value - 1,
-                        std::sync::atomic::Ordering::SeqCst,
-                        std::sync::atomic::Ordering::SeqCst,
+                        std::sync::atomic::Ordering::Acquire,
+                        std::sync::atomic::Ordering::Relaxed,
                     )
                     .is_ok()
                 {
@@ -50,14 +50,14 @@ impl Semaphore {
     /// Increment the semaphore value by one.
     pub fn signal(&self) {
         loop {
-            let value = self.value.load(std::sync::atomic::Ordering::SeqCst);
+            let value = self.value.load(std::sync::atomic::Ordering::Relaxed);
             if self
                 .value
                 .compare_exchange(
                     value,
                     value.checked_add(1).expect("`u32` addition overflow"),
-                    std::sync::atomic::Ordering::SeqCst,
-                    std::sync::atomic::Ordering::SeqCst,
+                    std::sync::atomic::Ordering::Release,
+                    std::sync::atomic::Ordering::Relaxed,
                 )
                 .is_ok()
             {

@@ -46,8 +46,8 @@ pub fn lock(futex: &AtomicU32) {
             .compare_exchange(
                 State::Unlocked.into(),
                 State::Locked.into(),
-                std::sync::atomic::Ordering::SeqCst,
-                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::Acquire,
+                std::sync::atomic::Ordering::Relaxed,
             )
             .is_ok()
         {
@@ -76,7 +76,7 @@ pub fn unlock(futex: &AtomicU32) {
     if !locked(futex) {
         return;
     }
-    futex.store(State::Unlocked.into(), std::sync::atomic::Ordering::SeqCst);
+    futex.store(State::Unlocked.into(), std::sync::atomic::Ordering::Relaxed);
     futex_wake(futex, WakeWaiters::Amount(U31::new(1).unwrap())).unwrap();
 }
 
@@ -85,7 +85,7 @@ pub fn unlock(futex: &AtomicU32) {
 /// If `futex` is not in any of the [`State`].
 fn locked(futex: &AtomicU32) -> bool {
     let s: State = futex
-        .load(std::sync::atomic::Ordering::SeqCst)
+        .load(std::sync::atomic::Ordering::Relaxed)
         .try_into()
         .expect("unknown state");
     match s {

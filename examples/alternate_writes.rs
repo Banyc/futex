@@ -72,8 +72,8 @@ fn f_wait(futex_p: &AtomicU32) {
             .compare_exchange(
                 FutexState::Available.into(),
                 FutexState::Unavailable.into(),
-                Ordering::SeqCst,
-                Ordering::SeqCst,
+                Ordering::Acquire,
+                Ordering::Relaxed,
             )
             .is_ok()
         {
@@ -99,7 +99,7 @@ fn f_post(futex_p: &AtomicU32) {
         .compare_exchange(
             FutexState::Unavailable.into(),
             FutexState::Available.into(),
-            Ordering::SeqCst,
+            Ordering::Relaxed,
             Ordering::SeqCst,
         )
         .is_ok()
