@@ -95,8 +95,8 @@ fn locked(futex: &AtomicU32) -> bool {
 }
 
 pub struct Mutex<T> {
-    value: SyncUnsafeCell<T>,
     futex: AtomicU32,
+    value: SyncUnsafeCell<T>,
 }
 impl<T> Mutex<T> {
     pub fn new(value: T) -> Self {
