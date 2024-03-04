@@ -31,6 +31,10 @@ impl CondVar {
     }
 
     pub fn notify_one(&self) {
+        // Because the implementation of `FUTEX_WAKE` has already called `smp_mb()`, `self.counter` has always been incremented before the other thread is waken.
+        // - References:
+        //   - futex implementation: <https://elixir.bootlin.com/linux/v5.11.1/source/kernel/futex.c#L111>
+        //   - `smp_mb()`: <https://lwn.net/Articles/847481/>
         self.counter
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if let Err(e) = futex_wake(&self.counter, WakeWaiters::Amount(U31::new(1).unwrap())) {
