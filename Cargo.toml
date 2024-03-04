@@ -5,6 +5,7 @@ edition = "2021"
 
 [dependencies]
 rustix = { version = "0.38", features = ["thread"] }
+sync-unsafe-cell = "0.1.1"
 
 [dev-dependencies]
 nix = { version = "0.28", features = ["process"] }

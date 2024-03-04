@@ -1,5 +1,6 @@
 use std::{mem::transmute, sync::atomic::AtomicU32, time::Duration};
 
+pub mod cond_var;
 pub mod mutex;
 pub mod semaphore;
 

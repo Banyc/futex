@@ -1,4 +1,9 @@
-use std::sync::atomic::AtomicU32;
+use std::{
+    ops::{Deref, DerefMut},
+    sync::atomic::AtomicU32,
+};
+
+use sync_unsafe_cell::SyncUnsafeCell;
 
 use crate::{futex_wake, resumed_futex_wait, FutexWaitContext, WakeWaiters, U31};
 
@@ -86,6 +91,55 @@ fn locked(futex: &AtomicU32) -> bool {
     match s {
         State::Unlocked => false,
         State::Locked => true,
+    }
+}
+
+pub struct Mutex<T> {
+    value: SyncUnsafeCell<T>,
+    futex: AtomicU32,
+}
+impl<T> Mutex<T> {
+    pub fn new(value: T) -> Self {
+        Self {
+            value: SyncUnsafeCell::new(value),
+            futex: new_unlocked_futex(),
+        }
+    }
+
+    pub fn lock(&self) -> MutexGuard<'_, T> {
+        lock(&self.futex);
+        MutexGuard { og: self }
+    }
+
+    pub fn into_inner(self) -> T {
+        self.value.into_inner()
+    }
+}
+
+pub struct MutexGuard<'a, T> {
+    og: &'a Mutex<T>,
+}
+impl<'a, T> MutexGuard<'a, T> {
+    pub fn unlock(self) -> &'a Mutex<T> {
+        unlock(&self.og.futex);
+        self.og
+    }
+}
+impl<T> Drop for MutexGuard<'_, T> {
+    fn drop(&mut self) {
+        unlock(&self.og.futex);
+    }
+}
+impl<T> Deref for MutexGuard<'_, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        unsafe { self.og.value.get().as_ref() }.unwrap()
+    }
+}
+impl<T> DerefMut for MutexGuard<'_, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        unsafe { self.og.value.get().as_mut() }.unwrap()
     }
 }
 
