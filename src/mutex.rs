@@ -34,10 +34,12 @@ pub fn new_unlocked_futex() -> AtomicU32 {
     AtomicU32::new(State::Unlocked.into())
 }
 
+/// Return `false` if it fails to lock in a nonblocking setting.
+///
 /// # Panic
 ///
 /// If `futex` is not in any of the [`State`].
-pub fn lock(futex: &AtomicU32) {
+pub fn lock(futex: &AtomicU32, blocking: LockBlocking) -> bool {
     loop {
         // Assert `futex` is in valid state
         let _ = locked(futex);
@@ -51,22 +53,34 @@ pub fn lock(futex: &AtomicU32) {
             )
             .is_ok()
         {
-            return;
+            return true;
         }
-        match resumed_futex_wait(FutexWaitContext {
-            word: futex,
-            expected: State::Locked.into(),
-            timeout: None,
-        }) {
-            Ok(()) => {
-                continue;
+        match blocking {
+            LockBlocking::Blocking => {
+                match resumed_futex_wait(FutexWaitContext {
+                    word: futex,
+                    expected: State::Locked.into(),
+                    timeout: None,
+                }) {
+                    Ok(()) => {
+                        continue;
+                    }
+                    Err(e) => match e.kind() {
+                        std::io::ErrorKind::WouldBlock => continue,
+                        _ => panic!("{e}"),
+                    },
+                }
             }
-            Err(e) => match e.kind() {
-                std::io::ErrorKind::WouldBlock => continue,
-                _ => panic!("{e}"),
-            },
+            LockBlocking::Nonblocking => {
+                return false;
+            }
         }
     }
+}
+#[derive(Debug, Clone, Copy)]
+pub enum LockBlocking {
+    Blocking,
+    Nonblocking,
 }
 
 /// # Panic
@@ -107,8 +121,15 @@ impl<T> Mutex<T> {
     }
 
     pub fn lock(&self) -> MutexGuard<'_, T> {
-        lock(&self.futex);
+        lock(&self.futex, LockBlocking::Blocking);
         MutexGuard { og: self }
+    }
+
+    pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
+        if !lock(&self.futex, LockBlocking::Nonblocking) {
+            return None;
+        };
+        Some(MutexGuard { og: self })
     }
 
     pub fn into_inner(self) -> T {
@@ -158,12 +179,12 @@ mod tests {
     #[test]
     fn test_lock_unlock() {
         let word = Arc::new(new_unlocked_futex());
-        lock(&word);
+        lock(&word, LockBlocking::Blocking);
 
         let waiting = std::thread::spawn({
             let word = word.clone();
             move || {
-                lock(&word);
+                lock(&word, LockBlocking::Blocking);
                 unlock(&word);
             }
         });
