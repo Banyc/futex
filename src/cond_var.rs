@@ -1,20 +1,23 @@
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 use crate::{futex_wake, mutex, resumed_futex_wait, FutexWaitContext, WakeWaiters, U31};
 
 pub struct CondVar {
     counter: AtomicU32,
+    waiters: AtomicUsize,
 }
 impl CondVar {
     pub fn new() -> Self {
         Self {
             counter: AtomicU32::new(0),
+            waiters: AtomicUsize::new(0),
         }
     }
 
     /// Could be a spurious wake-up
     pub fn wait<'a, T>(&self, m: mutex::MutexGuard<'a, T>) -> mutex::MutexGuard<'a, T> {
-        let c = self.counter.load(std::sync::atomic::Ordering::Relaxed);
+        self.waiters.fetch_add(1, Ordering::Relaxed);
+        let c = self.counter.load(Ordering::Relaxed);
         let m = m.unlock();
 
         if let Err(e) = resumed_futex_wait(FutexWaitContext {
@@ -31,20 +34,24 @@ impl CondVar {
     }
 
     pub fn notify_one(&self) {
+        if self.waiters.load(Ordering::Relaxed) == 0 {
+            return;
+        }
         // Because the implementation of `FUTEX_WAKE` has already called `smp_mb()`, `self.counter` has always been incremented before the other thread is waken.
         // - References:
         //   - futex implementation: <https://elixir.bootlin.com/linux/v5.11.1/source/kernel/futex.c#L111>
         //   - `smp_mb()`: <https://lwn.net/Articles/847481/>
-        self.counter
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.counter.fetch_add(1, Ordering::Relaxed);
         if let Err(e) = futex_wake(&self.counter, WakeWaiters::Amount(U31::new(1).unwrap())) {
             panic!("{e}");
         }
     }
 
     pub fn notify_all(&self) {
-        self.counter
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if self.waiters.load(Ordering::Relaxed) == 0 {
+            return;
+        }
+        self.counter.fetch_add(1, Ordering::Relaxed);
         if let Err(e) = futex_wake(&self.counter, WakeWaiters::All) {
             panic!("{e}");
         }
