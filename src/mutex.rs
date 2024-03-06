@@ -1,6 +1,6 @@
 use std::{
     ops::{Deref, DerefMut},
-    sync::atomic::AtomicU32,
+    sync::atomic::{AtomicU32, AtomicUsize},
 };
 
 use sync_unsafe_cell::SyncUnsafeCell;
@@ -39,24 +39,31 @@ pub fn new_unlocked_futex() -> AtomicU32 {
 /// # Panic
 ///
 /// If `futex` is not in any of the [`State`].
-pub fn lock(futex: &AtomicU32, blocking: LockBlocking) -> bool {
+pub fn lock(futex: &AtomicU32, waiters: Option<&AtomicUsize>, blocking: LockBlocking) -> bool {
+    const RETRIES: usize = 512;
     loop {
         // Assert `futex` is in valid state
         let _ = locked(futex);
 
-        if futex
-            .compare_exchange(
-                State::Unlocked.into(),
-                State::Locked.into(),
-                std::sync::atomic::Ordering::Acquire,
-                std::sync::atomic::Ordering::Relaxed,
-            )
-            .is_ok()
-        {
-            return true;
+        for _ in 0..RETRIES {
+            if futex
+                .compare_exchange(
+                    State::Unlocked.into(),
+                    State::Locked.into(),
+                    std::sync::atomic::Ordering::Acquire,
+                    std::sync::atomic::Ordering::Relaxed,
+                )
+                .is_ok()
+            {
+                return true;
+            }
+            std::hint::spin_loop();
         }
         match blocking {
             LockBlocking::Blocking => {
+                if let Some(waiters) = waiters {
+                    waiters.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
                 if let Err(e) = resumed_futex_wait(FutexWaitContext {
                     word: futex,
                     expected: State::Locked.into(),
@@ -65,6 +72,9 @@ pub fn lock(futex: &AtomicU32, blocking: LockBlocking) -> bool {
                     if !matches!(e.kind(), std::io::ErrorKind::WouldBlock) {
                         panic!("{e}");
                     }
+                }
+                if let Some(waiters) = waiters {
+                    waiters.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
                 }
             }
             LockBlocking::Nonblocking => {
@@ -82,11 +92,16 @@ pub enum LockBlocking {
 /// # Panic
 ///
 /// If `futex` is not in any of the [`State`].
-pub fn unlock(futex: &AtomicU32) {
+pub fn unlock(futex: &AtomicU32, waiters: Option<&AtomicUsize>) {
     if !locked(futex) {
         return;
     }
     futex.store(State::Unlocked.into(), std::sync::atomic::Ordering::Relaxed);
+    if let Some(waiters) = waiters {
+        if 0 == waiters.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+    }
     futex_wake(futex, WakeWaiters::Amount(U31::new(1).unwrap())).unwrap();
 }
 
@@ -106,23 +121,25 @@ fn locked(futex: &AtomicU32) -> bool {
 
 pub struct Mutex<T> {
     futex: AtomicU32,
+    waiters: AtomicUsize,
     value: SyncUnsafeCell<T>,
 }
 impl<T> Mutex<T> {
     pub fn new(value: T) -> Self {
         Self {
             value: SyncUnsafeCell::new(value),
+            waiters: AtomicUsize::new(0),
             futex: new_unlocked_futex(),
         }
     }
 
     pub fn lock(&self) -> MutexGuard<'_, T> {
-        lock(&self.futex, LockBlocking::Blocking);
+        lock(&self.futex, Some(&self.waiters), LockBlocking::Blocking);
         MutexGuard { og: self }
     }
 
     pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
-        if !lock(&self.futex, LockBlocking::Nonblocking) {
+        if !lock(&self.futex, Some(&self.waiters), LockBlocking::Nonblocking) {
             return None;
         };
         Some(MutexGuard { og: self })
@@ -146,13 +163,13 @@ pub struct MutexGuard<'a, T> {
 }
 impl<'a, T> MutexGuard<'a, T> {
     pub fn unlock(self) -> &'a Mutex<T> {
-        unlock(&self.og.futex);
+        unlock(&self.og.futex, Some(&self.og.waiters));
         self.og
     }
 }
 impl<T> Drop for MutexGuard<'_, T> {
     fn drop(&mut self) {
-        unlock(&self.og.futex);
+        unlock(&self.og.futex, Some(&self.og.waiters));
     }
 }
 impl<T> Deref for MutexGuard<'_, T> {
@@ -177,24 +194,24 @@ mod tests {
     #[test]
     fn test_unlock() {
         let word = new_unlocked_futex();
-        unlock(&word);
+        unlock(&word, None);
     }
 
     #[test]
     fn test_lock_unlock() {
         let word = Arc::new(new_unlocked_futex());
-        lock(&word, LockBlocking::Blocking);
+        lock(&word, None, LockBlocking::Blocking);
 
         let waiting = std::thread::spawn({
             let word = word.clone();
             move || {
-                lock(&word, LockBlocking::Blocking);
-                unlock(&word);
+                lock(&word, None, LockBlocking::Blocking);
+                unlock(&word, None);
             }
         });
         assert!(!waiting.is_finished());
 
-        unlock(&word);
+        unlock(&word, None);
 
         waiting.join().unwrap();
     }
