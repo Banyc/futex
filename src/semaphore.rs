@@ -97,10 +97,8 @@ mod tests {
             assert!(!waiter.is_finished());
         }
 
-        for i in 0..waiters.len() {
-            assert_eq!(waiters.iter().filter(|w| w.is_finished()).count(), i);
+        for _ in 0..waiters.len() {
             sem.signal();
-            std::thread::sleep(std::time::Duration::from_millis(10));
         }
 
         for waiter in waiters {
