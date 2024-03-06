@@ -74,18 +74,14 @@ impl<T, const N: usize> RingBuffer<T, N> {
                     };
                     *m.mutex().deref_mut() = CellValue::Cancelled;
 
-                    if self
-                        .read_ptr
+                    self.read_ptr
                         .compare_exchange(
                             read_ptr,
                             (read_ptr + 1) % self.buf.len(),
                             Ordering::SeqCst,
                             Ordering::SeqCst,
                         )
-                        .is_err()
-                    {
-                        continue;
-                    }
+                        .unwrap();
                 }
                 break write_ptr;
             };
@@ -115,17 +111,22 @@ impl<T, const N: usize> RingBuffer<T, N> {
             let Some(mut m) = m else {
                 continue;
             };
+            if read_ptr != self.read_ptr.load(Ordering::SeqCst) {
+                continue;
+            };
             let write_ptr = self.write_ptr.load(Ordering::SeqCst);
             if read_ptr == write_ptr {
                 continue;
             }
             let read = m.take().unwrap();
-            let _ = self.read_ptr.compare_exchange(
-                read_ptr,
-                (read_ptr + 1) % self.buf.len(),
-                Ordering::SeqCst,
-                Ordering::SeqCst,
-            );
+            self.read_ptr
+                .compare_exchange(
+                    read_ptr,
+                    (read_ptr + 1) % self.buf.len(),
+                    Ordering::SeqCst,
+                    Ordering::SeqCst,
+                )
+                .unwrap();
             return read;
         }
     }
@@ -175,22 +176,17 @@ impl<T> Cell<T> {
         &self,
         mut confirmed: impl FnMut() -> bool,
     ) -> Option<mutex::MutexGuard<'_, CellValue<T>>> {
-        let mut m = self.mutex.lock();
+        let m = self.mutex.lock();
         if !confirmed() {
             return None;
         }
-        loop {
-            match m.deref() {
-                CellValue::Some(_) => {
-                    return Some(m);
-                }
-                CellValue::Vacant => {
-                    m = self.cond_var.wait(m);
-                }
-                CellValue::Cancelled => {
-                    return None;
-                }
+        match m.deref() {
+            CellValue::Some(_) => Some(m),
+            CellValue::Vacant => {
+                self.cond_var.wait(m);
+                None
             }
+            CellValue::Cancelled => None,
         }
     }
 }
