@@ -73,8 +73,6 @@ impl<T, const N: usize> RingBuffer<T, N> {
                     if read_ptr != self.read_ptr.load(Ordering::SeqCst) {
                         continue;
                     };
-                    *m.mutex().deref_mut() = CellValue::Cancelled;
-
                     if self
                         .read_ptr
                         .compare_exchange(
@@ -88,6 +86,7 @@ impl<T, const N: usize> RingBuffer<T, N> {
                         // In case
                         continue;
                     }
+                    *m.mutex().deref_mut() = CellValue::Cancelled;
                 }
                 break write_ptr;
             };
@@ -97,7 +96,6 @@ impl<T, const N: usize> RingBuffer<T, N> {
             if write_ptr != self.write_ptr.load(Ordering::SeqCst) {
                 continue;
             }
-            **m.mutex() = CellValue::Some(new.take().unwrap());
             if self
                 .write_ptr
                 .compare_exchange(
@@ -111,6 +109,7 @@ impl<T, const N: usize> RingBuffer<T, N> {
                 // In case
                 continue;
             }
+            **m.mutex() = CellValue::Some(new.take().unwrap());
         }
     }
 
@@ -129,7 +128,6 @@ impl<T, const N: usize> RingBuffer<T, N> {
             if read_ptr == write_ptr {
                 continue;
             }
-            let read = m.take().unwrap();
             if self
                 .read_ptr
                 .compare_exchange(
@@ -143,7 +141,7 @@ impl<T, const N: usize> RingBuffer<T, N> {
                 // TODO: investigate why it happens
                 continue;
             }
-            return read;
+            return m.take().unwrap();
         }
     }
 }
