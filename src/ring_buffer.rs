@@ -15,12 +15,16 @@ pub struct RingBuffer<T, const N: usize> {
     /// Only allowed to go forward, never backward.
     ///
     /// Never proactively surpass `write_ptr`.
+    ///
+    /// Only increment when the current cell has been properly modified.
     read_ptr: AtomicUsize,
     /// Points to the next cell to write
     ///     
     /// Only allowed to go forward, never backward.
     ///
     /// Never proactively share cells with `read_ptr`.
+    ///
+    /// Only increment when the current cell has been properly modified.
     write_ptr: AtomicUsize,
 }
 impl<T, const N: usize> RingBuffer<T, N> {
