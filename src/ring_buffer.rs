@@ -16,16 +16,12 @@ pub struct RingBuffer<T, const N: usize> {
     /// Only allowed to go forward, never backward.
     ///
     /// Never proactively surpass `write_ptr`.
-    ///
-    /// Only increment when the current cell has been properly modified.
     read_ptr: AtomicUsize,
     /// Points to the next cell to write
     ///     
     /// Only allowed to go forward, never backward.
     ///
     /// Never proactively share cells with `read_ptr`.
-    ///
-    /// Only increment when the current cell has been properly modified.
     write_ptr: AtomicUsize,
 }
 impl<T, const N: usize> RingBuffer<T, N> {
@@ -70,9 +66,6 @@ impl<T, const N: usize> RingBuffer<T, N> {
                 if self.positive_distance(write_ptr, read_ptr) == 1 {
                     let cell = &self.buf[read_ptr];
                     let mut m = cell.write();
-                    if read_ptr != self.read_ptr.load(Ordering::SeqCst) {
-                        continue;
-                    };
                     if self
                         .read_ptr
                         .compare_exchange(
@@ -93,9 +86,6 @@ impl<T, const N: usize> RingBuffer<T, N> {
 
             let cell = &self.buf[write_ptr];
             let mut m = cell.write();
-            if write_ptr != self.write_ptr.load(Ordering::SeqCst) {
-                continue;
-            }
             if self
                 .write_ptr
                 .compare_exchange(
@@ -106,7 +96,6 @@ impl<T, const N: usize> RingBuffer<T, N> {
                 )
                 .is_err()
             {
-                // In case
                 continue;
             }
             **m.mutex() = CellValue::Some(new.take().unwrap());
@@ -119,9 +108,6 @@ impl<T, const N: usize> RingBuffer<T, N> {
             let cell = &self.buf[read_ptr];
             let m = cell.read(|| read_ptr == self.read_ptr.load(Ordering::SeqCst));
             let Some(mut m) = m else {
-                continue;
-            };
-            if read_ptr != self.read_ptr.load(Ordering::SeqCst) {
                 continue;
             };
             let write_ptr = self.write_ptr.load(Ordering::SeqCst);
@@ -138,7 +124,6 @@ impl<T, const N: usize> RingBuffer<T, N> {
                 )
                 .is_err()
             {
-                // TODO: investigate why it happens
                 continue;
             }
             return m.take().unwrap();
@@ -176,7 +161,6 @@ impl<T> Cell<T> {
         }
     }
 
-    /// Instructions in the `new` closure are protected by a mutex
     pub fn write(&self) -> WriteGuard<'_, T> {
         let m = self.mutex.lock();
         WriteGuard {
