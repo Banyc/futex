@@ -4,10 +4,10 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-ctrlc = "3.4.2"
 rustix = { version = "0.38", features = ["thread"] }
 sync-unsafe-cell = "0.1.1"
 
 [dev-dependencies]
+ctrlc = "3"
 nix = { version = "0.28", features = ["process"] }
 rustix = { version = "0.38", features = ["thread", "mm"] }

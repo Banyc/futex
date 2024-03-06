@@ -120,18 +120,12 @@ impl<T, const N: usize> RingBuffer<T, N> {
                 continue;
             }
             let read = m.take().unwrap();
-            if self
-                .read_ptr
-                .compare_exchange(
-                    read_ptr,
-                    (read_ptr + 1) % self.buf.len(),
-                    Ordering::SeqCst,
-                    Ordering::SeqCst,
-                )
-                .is_err()
-            {
-                continue;
-            }
+            let _ = self.read_ptr.compare_exchange(
+                read_ptr,
+                (read_ptr + 1) % self.buf.len(),
+                Ordering::SeqCst,
+                Ordering::SeqCst,
+            );
             return read;
         }
     }
@@ -261,13 +255,13 @@ mod tests {
     fn test_1() {
         const BUF_SIZE: usize = 3;
         let ring_buf: RingBuffer<usize, BUF_SIZE> = RingBuffer::new();
-        let ring_buf = Arc::new(DebugRingBuffer(ring_buf));
+        let ring_buf = Arc::new(ring_buf);
         let writes = u16::MAX as usize;
 
         ctrlc::set_handler({
             let ring_buf = ring_buf.clone();
             move || {
-                dbg!(&ring_buf.get());
+                dbg!(&ring_buf);
             }
         })
         .unwrap();
@@ -279,7 +273,7 @@ mod tests {
                 move || {
                     let mut prev = writes;
                     loop {
-                        let n = ring_buf.get().read();
+                        let n = ring_buf.read();
                         dbg!(n);
                         assert!(n < prev);
                         if n == 0 {
@@ -295,7 +289,7 @@ mod tests {
                 let ring_buf = ring_buf.clone();
                 move || {
                     for i in (0..writes).rev() {
-                        ring_buf.get().write_override(i);
+                        ring_buf.write_override(i);
                     }
                 }
             });
