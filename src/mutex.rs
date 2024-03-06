@@ -1,6 +1,6 @@
 use std::{
     ops::{Deref, DerefMut},
-    sync::atomic::{AtomicU32, AtomicUsize},
+    sync::atomic::{AtomicU32, AtomicUsize, Ordering},
 };
 
 use sync_unsafe_cell::SyncUnsafeCell;
@@ -50,8 +50,8 @@ pub fn lock(futex: &AtomicU32, waiters: Option<&AtomicUsize>, blocking: LockBloc
                 .compare_exchange(
                     State::Unlocked.into(),
                     State::Locked.into(),
-                    std::sync::atomic::Ordering::Acquire,
-                    std::sync::atomic::Ordering::Relaxed,
+                    Ordering::Acquire,
+                    Ordering::Relaxed,
                 )
                 .is_ok()
             {
@@ -62,7 +62,7 @@ pub fn lock(futex: &AtomicU32, waiters: Option<&AtomicUsize>, blocking: LockBloc
         match blocking {
             LockBlocking::Blocking => {
                 if let Some(waiters) = waiters {
-                    waiters.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    waiters.fetch_add(1, Ordering::Relaxed);
                 }
                 if let Err(e) = resumed_futex_wait(FutexWaitContext {
                     word: futex,
@@ -74,7 +74,7 @@ pub fn lock(futex: &AtomicU32, waiters: Option<&AtomicUsize>, blocking: LockBloc
                     }
                 }
                 if let Some(waiters) = waiters {
-                    waiters.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                    waiters.fetch_sub(1, Ordering::Relaxed);
                 }
             }
             LockBlocking::Nonblocking => {
@@ -96,9 +96,9 @@ pub fn unlock(futex: &AtomicU32, waiters: Option<&AtomicUsize>) {
     if !locked(futex) {
         return;
     }
-    futex.store(State::Unlocked.into(), std::sync::atomic::Ordering::Relaxed);
+    futex.store(State::Unlocked.into(), Ordering::Relaxed);
     if let Some(waiters) = waiters {
-        if 0 == waiters.load(std::sync::atomic::Ordering::Relaxed) {
+        if 0 == waiters.load(Ordering::Relaxed) {
             return;
         }
     }
@@ -110,7 +110,7 @@ pub fn unlock(futex: &AtomicU32, waiters: Option<&AtomicUsize>) {
 /// If `futex` is not in any of the [`State`].
 fn locked(futex: &AtomicU32) -> bool {
     let s: State = futex
-        .load(std::sync::atomic::Ordering::Relaxed)
+        .load(Ordering::Relaxed)
         .try_into()
         .expect("unknown state");
     match s {
