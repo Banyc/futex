@@ -31,7 +31,8 @@ pub struct RingBuffer<T, const N: usize> {
 impl<T, const N: usize> RingBuffer<T, N> {
     /// # Panic
     ///
-    /// If `N` does not reach `2`.
+    /// - If `N` does not reach `3`.
+    /// - If `N` reaches [`usize::MAX`].
     pub fn new() -> Self {
         assert!(3 <= N);
         assert!(N != usize::MAX);
@@ -74,14 +75,19 @@ impl<T, const N: usize> RingBuffer<T, N> {
                     };
                     *m.mutex().deref_mut() = CellValue::Cancelled;
 
-                    self.read_ptr
+                    if self
+                        .read_ptr
                         .compare_exchange(
                             read_ptr,
                             (read_ptr + 1) % self.buf.len(),
                             Ordering::SeqCst,
                             Ordering::SeqCst,
                         )
-                        .unwrap();
+                        .is_err()
+                    {
+                        // In case
+                        continue;
+                    }
                 }
                 break write_ptr;
             };
@@ -92,14 +98,19 @@ impl<T, const N: usize> RingBuffer<T, N> {
                 continue;
             }
             **m.mutex() = CellValue::Some(new.take().unwrap());
-            self.write_ptr
+            if self
+                .write_ptr
                 .compare_exchange(
                     write_ptr,
                     (write_ptr + 1) % self.buf.len(),
                     Ordering::SeqCst,
                     Ordering::SeqCst,
                 )
-                .unwrap();
+                .is_err()
+            {
+                // In case
+                continue;
+            }
         }
     }
 
@@ -119,14 +130,19 @@ impl<T, const N: usize> RingBuffer<T, N> {
                 continue;
             }
             let read = m.take().unwrap();
-            self.read_ptr
+            if self
+                .read_ptr
                 .compare_exchange(
                     read_ptr,
                     (read_ptr + 1) % self.buf.len(),
                     Ordering::SeqCst,
                     Ordering::SeqCst,
                 )
-                .unwrap();
+                .is_err()
+            {
+                // TODO: investigate why it happens
+                continue;
+            }
             return read;
         }
     }
