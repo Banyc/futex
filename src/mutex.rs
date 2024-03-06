@@ -40,7 +40,7 @@ pub fn new_unlocked_futex() -> AtomicU32 {
 ///
 /// If `futex` is not in any of the [`State`].
 pub fn lock(futex: &AtomicU32, waiters: Option<&AtomicUsize>, blocking: LockBlocking) -> bool {
-    const RETRIES: usize = 512;
+    const RETRIES: usize = 128;
     loop {
         // Assert `futex` is in valid state
         let _ = locked(futex);
