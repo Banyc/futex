@@ -43,6 +43,7 @@ impl CondVar {
         // - References:
         //   - futex implementation: <https://elixir.bootlin.com/linux/v5.11.1/source/kernel/futex.c#L111>
         //   - `smp_mb()`: <https://lwn.net/Articles/847481/>
+        self.counter.fetch_add(1, Ordering::Relaxed);
         if let Err(e) = futex_wake(&self.counter, WakeWaiters::Amount(U31::new(1).unwrap())) {
             panic!("{e}");
         }
@@ -52,6 +53,7 @@ impl CondVar {
         if self.waiters.load(Ordering::Relaxed) == 0 {
             return;
         }
+        self.counter.fetch_add(1, Ordering::Relaxed);
         if let Err(e) = futex_wake(&self.counter, WakeWaiters::All) {
             panic!("{e}");
         }
