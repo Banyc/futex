@@ -132,11 +132,11 @@ impl<T> Mutex<T> {
         self.value.into_inner()
     }
 }
-impl<T> core::fmt::Debug for Mutex<T> {
+impl<T: core::fmt::Debug> core::fmt::Debug for Mutex<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Mutex")
             .field("futex", &self.futex)
-            .field("value", &self.value.get())
+            .field("value", &unsafe { self.value.get().as_ref() })
             .finish()
     }
 }

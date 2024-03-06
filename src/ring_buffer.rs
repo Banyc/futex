@@ -206,6 +206,7 @@ impl<T> Default for Cell<T> {
     }
 }
 
+#[derive(Debug)]
 pub enum CellValue<T> {
     Vacant,
     Some(T),
