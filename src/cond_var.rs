@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 use crate::{futex_wake, mutex, resumed_futex_wait, FutexWaitContext, WakeWaiters, U31};
 
+#[derive(Debug)]
 pub struct CondVar {
     counter: AtomicU32,
     waiters: AtomicUsize,

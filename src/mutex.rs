@@ -57,18 +57,14 @@ pub fn lock(futex: &AtomicU32, blocking: LockBlocking) -> bool {
         }
         match blocking {
             LockBlocking::Blocking => {
-                match resumed_futex_wait(FutexWaitContext {
+                if let Err(e) = resumed_futex_wait(FutexWaitContext {
                     word: futex,
                     expected: State::Locked.into(),
                     timeout: None,
                 }) {
-                    Ok(()) => {
-                        continue;
+                    if !matches!(e.kind(), std::io::ErrorKind::WouldBlock) {
+                        panic!("{e}");
                     }
-                    Err(e) => match e.kind() {
-                        std::io::ErrorKind::WouldBlock => continue,
-                        _ => panic!("{e}"),
-                    },
                 }
             }
             LockBlocking::Nonblocking => {
@@ -134,6 +130,14 @@ impl<T> Mutex<T> {
 
     pub fn into_inner(self) -> T {
         self.value.into_inner()
+    }
+}
+impl<T> core::fmt::Debug for Mutex<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Mutex")
+            .field("futex", &self.futex)
+            .field("value", &self.value.get())
+            .finish()
     }
 }
 

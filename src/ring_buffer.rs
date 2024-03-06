@@ -1,12 +1,13 @@
 use std::{
     mem::MaybeUninit,
-    ops::Deref,
+    ops::{Deref, DerefMut},
     sync::atomic::{AtomicUsize, Ordering},
 };
 
 use crate::{cond_var, mutex};
 
 /// Multiple writers; single reader.
+#[derive(Debug)]
 pub struct RingBuffer<T, const N: usize> {
     buf: [Cell<T>; N],
     /// Points to the next cell to read.
@@ -59,7 +60,7 @@ impl<T, const N: usize> RingBuffer<T, N> {
 
     pub fn write_override(&self, new: T) {
         let mut new = Some(new);
-        loop {
+        while new.is_some() {
             // Override
             let write_ptr = loop {
                 let write_ptr = self.write_ptr.load(Ordering::SeqCst);
@@ -67,10 +68,11 @@ impl<T, const N: usize> RingBuffer<T, N> {
 
                 if self.positive_distance(write_ptr, read_ptr) == 1 {
                     let cell = &self.buf[read_ptr];
-                    let m = cell.clear(|| read_ptr == self.read_ptr.load(Ordering::SeqCst));
-                    let Some(_m) = m else {
+                    let mut m = cell.write();
+                    if read_ptr != self.read_ptr.load(Ordering::SeqCst) {
                         continue;
                     };
+                    *m.mutex().deref_mut() = CellValue::Cancelled;
 
                     if self
                         .read_ptr
@@ -102,7 +104,6 @@ impl<T, const N: usize> RingBuffer<T, N> {
                     Ordering::SeqCst,
                 )
                 .unwrap();
-            break;
         }
     }
 
@@ -114,6 +115,10 @@ impl<T, const N: usize> RingBuffer<T, N> {
             let Some(mut m) = m else {
                 continue;
             };
+            let write_ptr = self.write_ptr.load(Ordering::SeqCst);
+            if read_ptr == write_ptr {
+                continue;
+            }
             let read = m.take().unwrap();
             if self
                 .read_ptr
@@ -137,6 +142,19 @@ impl<T, const N: usize> Default for RingBuffer<T, N> {
     }
 }
 
+pub struct DebugRingBuffer<T: core::fmt::Debug, const N: usize>(pub RingBuffer<T, N>);
+impl<T: core::fmt::Debug, const N: usize> DebugRingBuffer<T, N> {
+    pub fn get(&self) -> &RingBuffer<T, N> {
+        &self.0
+    }
+}
+impl<T: core::fmt::Debug, const N: usize> Drop for DebugRingBuffer<T, N> {
+    fn drop(&mut self) {
+        dbg!(&self.0);
+    }
+}
+
+#[derive(Debug)]
 struct Cell<T> {
     cond_var: cond_var::CondVar,
     mutex: mutex::Mutex<CellValue<T>>,
@@ -147,18 +165,6 @@ impl<T> Cell<T> {
             cond_var: cond_var::CondVar::new(),
             mutex: mutex::Mutex::new(CellValue::Vacant),
         }
-    }
-
-    pub fn clear(&self, mut confirmed: impl FnMut() -> bool) -> Option<WriteGuard<'_, T>> {
-        let mut m = self.mutex.lock();
-        if !confirmed() {
-            return None;
-        }
-        *m = CellValue::Cancelled;
-        Some(WriteGuard {
-            mutex: m,
-            cond_var: &self.cond_var,
-        })
     }
 
     /// Instructions in the `new` closure are protected by a mutex
@@ -219,6 +225,14 @@ impl<T> CellValue<T> {
             CellValue::Cancelled => unreachable!(),
         }
     }
+
+    pub fn is_vacant(&self) -> bool {
+        match self {
+            CellValue::Vacant => true,
+            CellValue::Some(_) => false,
+            CellValue::Cancelled => false,
+        }
+    }
 }
 
 pub struct WriteGuard<'a, T> {
@@ -244,9 +258,19 @@ mod tests {
 
     #[test]
     fn test_1() {
-        let ring_buf: RingBuffer<usize, 3> = RingBuffer::new();
-        let ring_buf = Arc::new(ring_buf);
+        const BUF_SIZE: usize = 3;
+        let ring_buf: RingBuffer<usize, BUF_SIZE> = RingBuffer::new();
+        let ring_buf = Arc::new(DebugRingBuffer(ring_buf));
         let writes = u16::MAX as usize;
+
+        ctrlc::set_handler({
+            let ring_buf = ring_buf.clone();
+            move || {
+                dbg!(&ring_buf.get());
+            }
+        })
+        .unwrap();
+
         std::thread::scope(|s| {
             // Reader
             s.spawn({
@@ -254,7 +278,7 @@ mod tests {
                 move || {
                     let mut prev = writes;
                     loop {
-                        let n = ring_buf.read();
+                        let n = ring_buf.get().read();
                         dbg!(n);
                         assert!(n < prev);
                         if n == 0 {
@@ -270,7 +294,7 @@ mod tests {
                 let ring_buf = ring_buf.clone();
                 move || {
                     for i in (0..writes).rev() {
-                        ring_buf.write_override(i);
+                        ring_buf.get().write_override(i);
                     }
                 }
             });

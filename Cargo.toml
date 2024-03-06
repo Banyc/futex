@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+ctrlc = "3.4.2"
 rustix = { version = "0.38", features = ["thread"] }
 sync-unsafe-cell = "0.1.1"
 
