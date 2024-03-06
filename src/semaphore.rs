@@ -1,20 +1,18 @@
-use std::sync::atomic::AtomicU32;
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 use crate::{futex_wake, resumed_futex_wait, FutexWaitContext, WakeWaiters, U31};
-
-const EXPECTED_FUTEX: u32 = 0;
 
 /// A semaphore is an integer whose value is never allowed to fall below zero.
 #[derive(Debug)]
 pub struct Semaphore {
-    futex: AtomicU32,
     value: AtomicU32,
+    waiters: AtomicUsize,
 }
 impl Semaphore {
     pub fn new(value: u32) -> Self {
         Self {
-            futex: AtomicU32::new(EXPECTED_FUTEX),
             value: AtomicU32::new(value),
+            waiters: AtomicUsize::new(0),
         }
     }
 
@@ -22,50 +20,52 @@ impl Semaphore {
     /// If the semaphore value is currently zero, then it will block until the value becomes greater than zero.
     pub fn wait(&self) {
         loop {
-            let value = self.value.load(std::sync::atomic::Ordering::Relaxed);
+            let value = self.value.load(Ordering::Relaxed);
             if 0 < value {
                 if self
                     .value
-                    .compare_exchange(
-                        value,
-                        value - 1,
-                        std::sync::atomic::Ordering::Acquire,
-                        std::sync::atomic::Ordering::Relaxed,
-                    )
+                    .compare_exchange(value, value - 1, Ordering::Acquire, Ordering::Relaxed)
                     .is_ok()
                 {
                     return;
                 }
                 continue;
             }
-            resumed_futex_wait(FutexWaitContext {
-                word: &self.futex,
-                expected: EXPECTED_FUTEX,
+            self.waiters.fetch_add(1, Ordering::Relaxed);
+            if let Err(e) = resumed_futex_wait(FutexWaitContext {
+                word: &self.value,
+                expected: 0,
                 timeout: None,
-            })
-            .unwrap();
+            }) {
+                if !matches!(e.kind(), std::io::ErrorKind::WouldBlock) {
+                    panic!("{e}");
+                }
+            }
+            self.waiters.fetch_sub(1, Ordering::Relaxed);
         }
     }
 
     /// Increment the semaphore value by one.
     pub fn signal(&self) {
         loop {
-            let value = self.value.load(std::sync::atomic::Ordering::Relaxed);
+            let waiters = self.waiters.load(Ordering::Relaxed);
+            let value = self.value.load(Ordering::Relaxed);
             if self
                 .value
                 .compare_exchange(
                     value,
                     value.checked_add(1).expect("`u32` addition overflow"),
-                    std::sync::atomic::Ordering::Release,
-                    std::sync::atomic::Ordering::Relaxed,
+                    Ordering::Release,
+                    Ordering::Relaxed,
                 )
-                .is_ok()
+                .is_err()
             {
-                if value == 0 {
-                    futex_wake(&self.futex, WakeWaiters::Amount(U31::new(1).unwrap())).unwrap();
-                }
-                break;
+                continue;
             }
+            if 0 < waiters {
+                futex_wake(&self.value, WakeWaiters::Amount(U31::new(1).unwrap())).unwrap();
+            }
+            break;
         }
     }
 }
@@ -83,11 +83,12 @@ mod tests {
         let sem = Arc::new(sem);
         let n = 10;
         let mut waiters = vec![];
-        for _ in 0..n {
+        for i in 0..n {
             let waiter = std::thread::spawn({
                 let sem = sem.clone();
                 move || {
                     sem.wait();
+                    dbg!(i);
                 }
             });
             waiters.push(waiter);
@@ -101,7 +102,7 @@ mod tests {
             sem.signal();
         }
 
-        for waiter in waiters {
+        for waiter in waiters.into_iter() {
             waiter.join().unwrap();
         }
     }
