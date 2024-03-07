@@ -9,17 +9,14 @@ pub struct Semaphore {
     waiters: Option<AtomicUsize>,
 }
 impl Semaphore {
-    /// # Safety
-    ///
-    /// Must sure that the code in critical sections is guaranteed to not panic
-    pub unsafe fn new_panic_unsafe(value: u32) -> Self {
+    pub fn new(value: u32) -> Self {
         Self {
             value: AtomicU32::new(value),
             waiters: Some(AtomicUsize::new(0)),
         }
     }
 
-    pub fn new(value: u32) -> Self {
+    pub fn new_slow(value: u32) -> Self {
         Self {
             value: AtomicU32::new(value),
             waiters: None,

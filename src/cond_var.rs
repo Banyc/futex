@@ -8,17 +8,14 @@ pub struct CondVar {
     waiters: Option<AtomicUsize>,
 }
 impl CondVar {
-    /// # Safety
-    ///
-    /// Must sure that the code in critical sections is guaranteed to not panic
-    pub unsafe fn new_panic_unsafe() -> Self {
+    pub fn new() -> Self {
         Self {
             counter: AtomicU32::new(0),
             waiters: Some(AtomicUsize::new(0)),
         }
     }
 
-    pub fn new() -> Self {
+    pub fn new_slow() -> Self {
         Self {
             counter: AtomicU32::new(0),
             waiters: None,

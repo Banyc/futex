@@ -125,10 +125,7 @@ pub struct Mutex<T> {
     value: SyncUnsafeCell<T>,
 }
 impl<T> Mutex<T> {
-    /// # Safety
-    ///
-    /// Must sure that the code in critical sections is guaranteed to not panic
-    pub unsafe fn new_panic_unsafe(value: T) -> Self {
+    pub fn new(value: T) -> Self {
         Self {
             value: SyncUnsafeCell::new(value),
             waiters: Some(AtomicUsize::new(0)),
@@ -136,7 +133,7 @@ impl<T> Mutex<T> {
         }
     }
 
-    pub fn new(value: T) -> Self {
+    pub fn new_slow(value: T) -> Self {
         Self {
             value: SyncUnsafeCell::new(value),
             waiters: None,
