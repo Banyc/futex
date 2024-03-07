@@ -96,7 +96,7 @@ pub fn unlock(futex: &AtomicU32, waiters: Option<&AtomicUsize>) {
     if !locked(futex) {
         return;
     }
-    futex.store(State::Unlocked.into(), Ordering::Relaxed);
+    futex.store(State::Unlocked.into(), Ordering::Release);
     if let Some(waiters) = waiters {
         if 0 == waiters.load(Ordering::Relaxed) {
             return;
