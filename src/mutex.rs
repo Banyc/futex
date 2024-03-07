@@ -121,25 +121,40 @@ fn locked(futex: &AtomicU32) -> bool {
 
 pub struct Mutex<T> {
     futex: AtomicU32,
-    waiters: AtomicUsize,
+    waiters: Option<AtomicUsize>,
     value: SyncUnsafeCell<T>,
 }
 impl<T> Mutex<T> {
+    /// # Safety
+    ///
+    /// Must sure that the code in critical sections is guaranteed to not panic
+    pub unsafe fn new_panic_unsafe(value: T) -> Self {
+        Self {
+            value: SyncUnsafeCell::new(value),
+            waiters: Some(AtomicUsize::new(0)),
+            futex: new_unlocked_futex(),
+        }
+    }
+
     pub fn new(value: T) -> Self {
         Self {
             value: SyncUnsafeCell::new(value),
-            waiters: AtomicUsize::new(0),
+            waiters: None,
             futex: new_unlocked_futex(),
         }
     }
 
     pub fn lock(&self) -> MutexGuard<'_, T> {
-        lock(&self.futex, Some(&self.waiters), LockBlocking::Blocking);
+        lock(&self.futex, self.waiters.as_ref(), LockBlocking::Blocking);
         MutexGuard { og: self }
     }
 
     pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
-        if !lock(&self.futex, Some(&self.waiters), LockBlocking::Nonblocking) {
+        if !lock(
+            &self.futex,
+            self.waiters.as_ref(),
+            LockBlocking::Nonblocking,
+        ) {
             return None;
         };
         Some(MutexGuard { og: self })
@@ -163,13 +178,13 @@ pub struct MutexGuard<'a, T> {
 }
 impl<'a, T> MutexGuard<'a, T> {
     pub fn unlock(self) -> &'a Mutex<T> {
-        unlock(&self.og.futex, Some(&self.og.waiters));
+        unlock(&self.og.futex, self.og.waiters.as_ref());
         self.og
     }
 }
 impl<T> Drop for MutexGuard<'_, T> {
     fn drop(&mut self) {
-        unlock(&self.og.futex, Some(&self.og.waiters));
+        unlock(&self.og.futex, self.og.waiters.as_ref());
     }
 }
 impl<T> Deref for MutexGuard<'_, T> {
@@ -187,7 +202,7 @@ impl<T> DerefMut for MutexGuard<'_, T> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{atomic::AtomicBool, Arc};
 
     use super::*;
 
@@ -214,5 +229,24 @@ mod tests {
         unlock(&word, None);
 
         waiting.join().unwrap();
+    }
+
+    #[test]
+    fn test_atomics_mutex() {
+        let m = Mutex::new(0);
+        let a = AtomicBool::new(false);
+        std::thread::scope(|s| {
+            for _ in 0..16 {
+                s.spawn(|| {
+                    for _ in 0..u16::MAX {
+                        let mut m = m.lock();
+                        let b = a.load(Ordering::Relaxed);
+                        *m = 1;
+                        a.compare_exchange(b, !b, Ordering::Relaxed, Ordering::Relaxed)
+                            .unwrap();
+                    }
+                });
+            }
+        })
     }
 }

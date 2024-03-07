@@ -79,7 +79,7 @@ impl<T, const N: usize> RingBuffer<T, N> {
                         // In case
                         continue;
                     }
-                    *m.mutex().deref_mut() = CellValue::Cancelled;
+                    *m.locked().deref_mut() = CellValue::Cancelled;
                 }
                 break write_ptr;
             };
@@ -98,7 +98,7 @@ impl<T, const N: usize> RingBuffer<T, N> {
             {
                 continue;
             }
-            **m.mutex() = CellValue::Some(new.take().unwrap());
+            **m.locked() = CellValue::Some(new.take().unwrap());
         }
     }
 
@@ -164,7 +164,7 @@ impl<T> Cell<T> {
     pub fn write(&self) -> WriteGuard<'_, T> {
         let m = self.mutex.lock();
         WriteGuard {
-            mutex: m,
+            locked: m,
             cond_var: &self.cond_var,
         }
     }
@@ -225,12 +225,12 @@ impl<T> CellValue<T> {
 }
 
 pub struct WriteGuard<'a, T> {
-    mutex: mutex::MutexGuard<'a, CellValue<T>>,
+    locked: mutex::MutexGuard<'a, CellValue<T>>,
     cond_var: &'a cond_var::CondVar,
 }
 impl<'a, T> WriteGuard<'a, T> {
-    pub fn mutex(&mut self) -> &mut mutex::MutexGuard<'a, CellValue<T>> {
-        &mut self.mutex
+    pub fn locked(&mut self) -> &mut mutex::MutexGuard<'a, CellValue<T>> {
+        &mut self.locked
     }
 }
 impl<T> Drop for WriteGuard<'_, T> {

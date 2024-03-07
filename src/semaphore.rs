@@ -6,13 +6,23 @@ use crate::{futex_wake, resumed_futex_wait, FutexWaitContext, WakeWaiters, U31};
 #[derive(Debug)]
 pub struct Semaphore {
     value: AtomicU32,
-    waiters: AtomicUsize,
+    waiters: Option<AtomicUsize>,
 }
 impl Semaphore {
+    /// # Safety
+    ///
+    /// Must sure that the code in critical sections is guaranteed to not panic
+    pub unsafe fn new_panic_unsafe(value: u32) -> Self {
+        Self {
+            value: AtomicU32::new(value),
+            waiters: Some(AtomicUsize::new(0)),
+        }
+    }
+
     pub fn new(value: u32) -> Self {
         Self {
             value: AtomicU32::new(value),
-            waiters: AtomicUsize::new(0),
+            waiters: None,
         }
     }
 
@@ -31,7 +41,9 @@ impl Semaphore {
                 }
                 continue;
             }
-            self.waiters.fetch_add(1, Ordering::Relaxed);
+            if let Some(waiters) = &self.waiters {
+                waiters.fetch_add(1, Ordering::Relaxed);
+            }
             if let Err(e) = resumed_futex_wait(FutexWaitContext {
                 word: &self.value,
                 expected: 0,
@@ -41,14 +53,15 @@ impl Semaphore {
                     panic!("{e}");
                 }
             }
-            self.waiters.fetch_sub(1, Ordering::Relaxed);
+            if let Some(waiters) = &self.waiters {
+                waiters.fetch_sub(1, Ordering::Relaxed);
+            }
         }
     }
 
     /// Increment the semaphore value by one.
     pub fn signal(&self) {
         loop {
-            let waiters = self.waiters.load(Ordering::Relaxed);
             let value = self.value.load(Ordering::Relaxed);
             if self
                 .value
@@ -62,11 +75,14 @@ impl Semaphore {
             {
                 continue;
             }
-            if 0 < waiters {
-                futex_wake(&self.value, WakeWaiters::Amount(U31::new(1).unwrap())).unwrap();
-            }
             break;
         }
+        if let Some(waiters) = &self.waiters {
+            if 0 == waiters.load(Ordering::Relaxed) {
+                return;
+            }
+        }
+        futex_wake(&self.value, WakeWaiters::Amount(U31::new(1).unwrap())).unwrap();
     }
 }
 

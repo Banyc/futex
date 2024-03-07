@@ -5,19 +5,31 @@ use crate::{futex_wake, mutex, resumed_futex_wait, FutexWaitContext, WakeWaiters
 #[derive(Debug)]
 pub struct CondVar {
     counter: AtomicU32,
-    waiters: AtomicUsize,
+    waiters: Option<AtomicUsize>,
 }
 impl CondVar {
+    /// # Safety
+    ///
+    /// Must sure that the code in critical sections is guaranteed to not panic
+    pub unsafe fn new_panic_unsafe() -> Self {
+        Self {
+            counter: AtomicU32::new(0),
+            waiters: Some(AtomicUsize::new(0)),
+        }
+    }
+
     pub fn new() -> Self {
         Self {
             counter: AtomicU32::new(0),
-            waiters: AtomicUsize::new(0),
+            waiters: None,
         }
     }
 
     /// Could be a spurious wake-up
     pub fn wait<'a, T>(&self, m: mutex::MutexGuard<'a, T>) -> mutex::MutexGuard<'a, T> {
-        self.waiters.fetch_add(1, Ordering::Relaxed);
+        if let Some(waiters) = &self.waiters {
+            waiters.fetch_add(1, Ordering::Relaxed);
+        }
         let c = self.counter.load(Ordering::Relaxed);
         let m = m.unlock();
 
@@ -30,14 +42,18 @@ impl CondVar {
                 panic!("{e}");
             }
         }
-        self.waiters.fetch_sub(1, Ordering::Relaxed);
+        if let Some(waiters) = &self.waiters {
+            waiters.fetch_sub(1, Ordering::Relaxed);
+        }
 
         m.lock()
     }
 
     pub fn notify_one(&self) {
-        if self.waiters.load(Ordering::Relaxed) == 0 {
-            return;
+        if let Some(waiters) = &self.waiters {
+            if waiters.load(Ordering::Relaxed) == 0 {
+                return;
+            }
         }
         // Because the implementation of `FUTEX_WAKE` has already called `smp_mb()`, `self.counter` has always been incremented before the other thread is waken.
         // - References:
@@ -50,8 +66,10 @@ impl CondVar {
     }
 
     pub fn notify_all(&self) {
-        if self.waiters.load(Ordering::Relaxed) == 0 {
-            return;
+        if let Some(waiters) = &self.waiters {
+            if waiters.load(Ordering::Relaxed) == 0 {
+                return;
+            }
         }
         self.counter.fetch_add(1, Ordering::Relaxed);
         if let Err(e) = futex_wake(&self.counter, WakeWaiters::All) {
