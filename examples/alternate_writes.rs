@@ -99,8 +99,8 @@ fn f_post(futex_p: &AtomicU32) {
         .compare_exchange(
             FutexState::Unavailable.into(),
             FutexState::Available.into(),
+            Ordering::Release,
             Ordering::Relaxed,
-            Ordering::SeqCst,
         )
         .is_ok()
     {
